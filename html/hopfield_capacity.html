@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hopfield Network · Capacity Demo</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'IBM Plex Mono','SF Mono','Fira Code',monospace;background:#fff;color:#1a1a1a;padding:16px;max-width:960px;margin:0 auto}
+  h2{font-size:16px;font-weight:700;letter-spacing:-0.02em;margin-bottom:2px}
+  .sub{font-size:11px;color:#666;margin-bottom:10px}
+  .pat-bar{display:flex;flex-wrap:wrap;gap:4px;padding:8px;background:rgba(0,0,0,0.02);border-radius:6px;margin-bottom:10px;align-items:flex-end}
+  .pat-bar .label{font-size:10px;font-weight:600;color:#666;width:100%;margin-bottom:2px}
+  .mini{text-align:center;cursor:pointer;user-select:none;transition:transform 0.12s,opacity 0.12s}
+  .mini.off{opacity:0.3;transform:scale(0.92)}
+  .mini canvas{display:block;border-radius:3px}
+  .mini .mlbl{font-size:10px;margin-top:1px;font-weight:600}
+  .status-bar{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:10px;padding:6px 10px;border-radius:5px;font-size:12px;font-weight:600}
+  .status-bar.ok{background:#e8f5e9;color:#2e7d32}
+  .status-bar.warn{background:#fff3e0;color:#e65100}
+  .status-bar.bad{background:#ffebee;color:#c62828}
+  .main{display:flex;gap:16px;flex-wrap:wrap}
+  .grid-panel canvas{border:1px solid #ddd;border-radius:4px}
+  .right{flex:1;min-width:260px}
+  .sec-label{font-size:10px;font-weight:600;color:#666;margin-bottom:4px}
+  .ovlp-row{display:flex;align-items:center;gap:4px;margin-bottom:2px;font-size:11px}
+  .ovlp-bar{width:80px;height:10px;background:#eee;border-radius:2px;overflow:hidden}
+  .ovlp-fill{height:100%;border-radius:2px;opacity:0.7;transition:width 0.08s}
+  .chart canvas{border:1px solid #e0e0e0;border-radius:4px;margin-bottom:8px}
+  .ctrls{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+  .btn{padding:5px 14px;font-size:11px;font-weight:700;font-family:inherit;border-radius:5px;cursor:pointer;border:2px solid;transition:all 0.12s}
+  .btn-run{border-color:#1a3a5c;background:transparent;color:#1a3a5c}
+  .btn-run.on{background:#1a3a5c;color:#fff}
+  .btn-run:disabled{opacity:0.35;cursor:default}
+  .btn-step{border-color:#888;background:transparent;color:#444;font-weight:600}
+  .btn-step:disabled{opacity:0.35;cursor:default}
+  .btn-reset{border-color:#c0392b;background:transparent;color:#c0392b;font-weight:600}
+  .sp{display:flex;align-items:center;gap:4px;margin-left:4px}
+  .sp span{font-size:9px;color:#666}
+  .sp input{width:60px;accent-color:#1a3a5c}
+  .legend{margin-top:10px;padding:6px 8px;background:rgba(0,0,0,0.02);border-radius:4px;font-size:10px;color:#666;line-height:1.6}
+  .sw{display:inline-block;width:9px;height:9px;border-radius:2px;vertical-align:middle}
+  .tgt-select{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;align-items:center}
+  .tgt-btn{padding:3px 8px;font-size:11px;font-weight:700;font-family:inherit;border:2px solid #ccc;border-radius:4px;background:transparent;color:#666;cursor:pointer;transition:all 0.1s}
+  .tgt-btn.active{border-color:#1a3a5c;background:#1a3a5c;color:#fff}
+  .tgt-btn.disabled{opacity:0.25;cursor:default}
+  .corr-row{display:flex;align-items:center;gap:6px;margin-bottom:8px}
+  .corr-row span{font-size:10px;color:#666}
+  .corr-row input{width:80px;accent-color:#1a3a5c}
+  .corr-val{font-size:11px;font-weight:600;min-width:28px}
+  .conv-msg{margin-top:4px;font-size:12px;font-weight:700;text-align:center}
+</style>
+</head>
+<body>
+
+<h2>Hopfield Network · Capacity Phase Transition</h2>
+<p class="sub">Toggle letters on/off to see retrieval degrade as M approaches capacity. N=100 · Pseudoinverse rule · α<sub>c</sub> ≈ 0.138</p>
+
+<div class="pat-bar" id="pat-bar">
+  <span class="label">Click letters to add/remove from memory (recommended order for best capacity shown left→right):</span>
+</div>
+
+<div class="status-bar" id="status-bar"></div>
+
+<div class="main">
+  <div class="grid-panel">
+    <div class="tgt-select" id="tgt-select">
+      <span style="font-size:10px;font-weight:600;color:#666">Retrieve:</span>
+    </div>
+    <canvas id="grid-cv" width="322" height="322"></canvas>
+    <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:11px">
+      <span>Step: <strong id="step-ct">0</strong></span>
+      <span style="color:#666">E = <span id="e-val">0</span></span>
+    </div>
+    <div class="conv-msg" id="conv-msg" style="display:none"></div>
+  </div>
+  <div class="right">
+    <div style="margin-bottom:8px">
+      <div class="sec-label">Overlap m<sup>μ</sup> with active patterns</div>
+      <div id="ovlp-bars"></div>
+    </div>
+    <div class="chart">
+      <div class="sec-label">Energy E(s)</div>
+      <canvas id="chart-cv" width="310" height="120"></canvas>
+    </div>
+    <div class="corr-row">
+      <span>Corruption:</span>
+      <input type="range" id="corr-sl" min="5" max="45" value="15">
+      <span class="corr-val" id="corr-v">15%</span>
+    </div>
+    <div class="ctrls">
+      <button class="btn btn-run" id="btn-run" onclick="toggleRun()">▶ Run</button>
+      <button class="btn btn-step" id="btn-step" onclick="doStep()">Step</button>
+      <button class="btn btn-reset" onclick="resetSim()">Reset</button>
+      <div class="sp"><span>Fast</span><input type="range" id="sp-sl" min="10" max="300" value="50"><span>Slow</span></div>
+    </div>
+    <div class="legend">
+      <span class="sw" style="background:#1a3a5c"></span> +1 &nbsp;
+      <span class="sw" style="background:#f0f0f0;border:1px solid #ccc"></span> −1 &nbsp;
+      <span class="sw" style="background:#e67e22"></span> flipped<br>
+      W = Ξ(Ξ<sup>T</sup>Ξ)<sup>−1</sup>Ξ<sup>T</sup> (pseudoinverse rule)<br>
+      Capacity α<sub>c</sub> ≈ 0.138 → M<sub>max</sub> ≈ 13–14 for N=100
+    </div>
+  </div>
+</div>
+
+<script>
+const N=100,G=10,CELL=32;
+// ── Colors per letter ──
+const PCOL={A:"#2980b9",B:"#8e44ad",C:"#c0392b",D:"#d35400",E:"#27ae60",F:"#16a085",G:"#2c3e50",H:"#e74c3c",I:"#3498db",J:"#9b59b6",K:"#e67e22",L:"#1abc9c",N:"#34495e",O:"#e91e63",P:"#795548",T:"#607d8b",U:"#ff9800",X:"#673ab7",Z:"#009688"};
+// Recommended order (greedy by distinctiveness, from our analysis)
+const ORDER=["A","X","I","K","J","D","Z","N","E","U","L","B","G","T","O","F","P","H","C"];
+
+// ── Letter patterns ──
+function mp(cs){const p=new Array(N).fill(-1);for(const[r,c]of cs)if(r>=0&&r<10&&c>=0&&c<10)p[r*10+c]=1;return p}
+const LETS={
+A:()=>{let c=[];for(let r=1;r<=8;r++){c.push([r,2]);c.push([r,7])}for(let k=3;k<=6;k++){c.push([1,k]);c.push([5,k])}return mp(c)},
+B:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=6;k++){c.push([1,k]);c.push([5,k]);c.push([8,k])}for(let r=2;r<=4;r++)c.push([r,7]);for(let r=6;r<=7;r++)c.push([r,7]);return mp(c)},
+C:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=7;k++){c.push([1,k]);c.push([8,k])}return mp(c)},
+D:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=5;k++){c.push([1,k]);c.push([8,k])}c.push([2,6],[3,7],[4,7],[5,7],[6,7],[7,6]);return mp(c)},
+E:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=7;k++){c.push([1,k]);c.push([8,k])}for(let k=3;k<=5;k++)c.push([5,k]);return mp(c)},
+F:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=7;k++)c.push([1,k]);for(let k=3;k<=5;k++)c.push([5,k]);return mp(c)},
+G:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=7;k++){c.push([1,k]);c.push([8,k])}for(let r=5;r<=7;r++)c.push([r,7]);c.push([5,6]);return mp(c)},
+H:()=>{let c=[];for(let r=1;r<=8;r++){c.push([r,2]);c.push([r,7])}for(let k=3;k<=6;k++)c.push([5,k]);return mp(c)},
+I:()=>{let c=[];for(let k=2;k<=7;k++){c.push([1,k]);c.push([8,k])}for(let r=2;r<=7;r++)c.push([r,5]);return mp(c)},
+J:()=>{let c=[];for(let k=3;k<=7;k++)c.push([1,k]);for(let r=1;r<=7;r++)c.push([r,7]);c.push([8,4],[8,5],[8,6],[7,3]);return mp(c)},
+K:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);c.push([5,3],[4,4],[3,5],[2,6],[1,7],[6,4],[7,5],[8,6]);return mp(c)},
+L:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=7;k++)c.push([8,k]);return mp(c)},
+N:()=>{let c=[];for(let r=1;r<=8;r++){c.push([r,2]);c.push([r,7])}c.push([2,3],[3,4],[4,4],[5,5],[6,5],[7,6]);return mp(c)},
+O:()=>{let c=[];for(let r=2;r<=7;r++){c.push([r,2]);c.push([r,7])}for(let k=3;k<=6;k++){c.push([1,k]);c.push([8,k])}return mp(c)},
+P:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=6;k++){c.push([1,k]);c.push([5,k])}for(let r=2;r<=4;r++)c.push([r,7]);return mp(c)},
+T:()=>{let c=[];for(let k=1;k<=8;k++)c.push([1,k]);for(let r=2;r<=8;r++)c.push([r,5]);return mp(c)},
+U:()=>{let c=[];for(let r=1;r<=7;r++){c.push([r,2]);c.push([r,7])}for(let k=3;k<=6;k++)c.push([8,k]);return mp(c)},
+X:()=>{let c=[];for(let i=0;i<8;i++){c.push([i+1,i+1]);c.push([i+1,8-i])}return mp(c)},
+Z:()=>{let c=[];for(let k=1;k<=8;k++){c.push([1,k]);c.push([8,k])}c.push([2,7],[3,6],[4,5],[5,4],[6,3],[7,2]);return mp(c)}
+};
+
+// ── Linear algebra helpers ──
+function pinvW(pats){
+  const M=pats.length;if(M===0)return Array.from({length:N},()=>new Float64Array(N));
+  // P = N x M
+  const P=[];for(let i=0;i<N;i++){P[i]=new Float64Array(M);for(let m=0;m<M;m++)P[i][m]=pats[m][i]}
+  // G = P^T P (M x M)
+  const Gm=[];for(let a=0;a<M;a++){Gm[a]=new Float64Array(M);for(let b=0;b<M;b++){let s=0;for(let i=0;i<N;i++)s+=P[i][a]*P[i][b];Gm[a][b]=s}}
+  // Invert G (small matrix)
+  const inv=invertMatrix(Gm,M);
+  if(!inv)return hebbW(pats);
+  // W = P inv(G) P^T, zero diagonal
+  const W=Array.from({length:N},()=>new Float64Array(N));
+  // Compute P inv(G) = N x M
+  const PI=[];for(let i=0;i<N;i++){PI[i]=new Float64Array(M);for(let m=0;m<M;m++){let s=0;for(let k=0;k<M;k++)s+=P[i][k]*inv[k][m];PI[i][m]=s}}
+  for(let i=0;i<N;i++)for(let j=0;j<N;j++){let s=0;for(let m=0;m<M;m++)s+=PI[i][m]*P[j][m];W[i][j]=s}
+  for(let i=0;i<N;i++)W[i][i]=0;
+  return W;
+}
+function hebbW(pats){
+  const W=Array.from({length:N},()=>new Float64Array(N));
+  for(const p of pats)for(let i=0;i<N;i++)for(let j=0;j<N;j++)if(i!==j)W[i][j]+=p[i]*p[j]/N;
+  return W;
+}
+function invertMatrix(A,n){
+  const a=A.map(r=>[...r]);const I=Array.from({length:n},(_,i)=>{const r=new Float64Array(n);r[i]=1;return r});
+  for(let c=0;c<n;c++){
+    let mx=Math.abs(a[c][c]),mr=c;
+    for(let r=c+1;r<n;r++)if(Math.abs(a[r][c])>mx){mx=Math.abs(a[r][c]);mr=r}
+    if(mx<1e-12)return null;
+    [a[c],a[mr]]=[a[mr],a[c]];[I[c],I[mr]]=[I[mr],I[c]];
+    const d=a[c][c];for(let j=0;j<n;j++){a[c][j]/=d;I[c][j]/=d}
+    for(let r=0;r<n;r++){if(r===c)continue;const f=a[r][c];for(let j=0;j<n;j++){a[r][j]-=f*a[c][j];I[r][j]-=f*I[c][j]}}
+  }
+  return I;
+}
+function energy(s,W){let E=0;for(let i=0;i<N;i++)for(let j=i+1;j<N;j++)E-=W[i][j]*s[i]*s[j];return E}
+function lf(s,W,i){let h=0;for(let j=0;j<N;j++)h+=W[i][j]*s[j];return h}
+function ovlp(s,p){let d=0;for(let i=0;i<N;i++)d+=s[i]*p[i];return d/N}
+function mb32(a){return function(){a|=0;a=(a+0x6d2b79f5)|0;let t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296}}
+function corrupt(p,n,rng){const s=[...p],ix=Array.from({length:N},(_,i)=>i);for(let i=ix.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[ix[i],ix[j]]=[ix[j],ix[i]]}for(let k=0;k<n;k++)s[ix[k]]*=-1;return s}
+function rndOrd(rng){const o=Array.from({length:N},(_,i)=>i);for(let i=o.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[o[i],o[j]]=[o[j],o[i]]}return o}
+
+// ── State ──
+let activeKeys=ORDER.slice(0,7); // start with 7 (reliable)
+let targetKey="A";
+let corrPct=15;
+let rng,state,W,eHist,overlaps,stepCt,running=false,converged=false,convergedTo=null;
+let aN=-1,jF=-1,queue=[],qI=0,intId=null;
+
+function getActivePats(){return activeKeys.map(k=>LETS[k]())}
+function rebuildW(){W=pinvW(getActivePats())}
+
+function initSim(){
+  if(intId){clearInterval(intId);intId=null}
+  running=false;converged=false;convergedTo=null;aN=-1;jF=-1;
+  if(!activeKeys.includes(targetKey))targetKey=activeKeys[0]||"A";
+  rebuildW();
+  rng=mb32(42+targetKey.charCodeAt(0));
+  const pat=LETS[targetKey]();
+  const nf=Math.round(corrPct/100*N);
+  state=corrupt(pat,nf,rng);
+  eHist=[energy(state,W)];
+  overlaps={};activeKeys.forEach(k=>{overlaps[k]=ovlp(state,LETS[k]())});
+  stepCt=0;queue=rndOrd(rng);qI=0;
+  updateAll();
+}
+
+function doOneStep(){
+  if(converged||activeKeys.length<2)return;
+  if(qI>=queue.length){queue=rndOrd(rng);qI=0}
+  const ni=queue[qI];aN=ni;
+  const h=lf(state,W,ni);const nv=h>=0?1:-1;
+  if(nv!==state[ni]){state[ni]=nv;jF=ni}else{jF=-1}
+  eHist.push(energy(state,W));
+  activeKeys.forEach(k=>{overlaps[k]=ovlp(state,LETS[k]())});
+  stepCt++;qI++;
+  const best=activeKeys.reduce((a,k)=>Math.abs(overlaps[k])>Math.abs(overlaps[a])?k:a,activeKeys[0]);
+  if(Math.abs(overlaps[best])>=0.97){converged=true;running=false;aN=-1;convergedTo=overlaps[best]>0?best:`−${best}`;if(intId){clearInterval(intId);intId=null}}
+  updateAll();
+}
+function toggleRun(){
+  if(converged||activeKeys.length<2)return;
+  running=!running;
+  if(running){const sp=+document.getElementById('sp-sl').value;intId=setInterval(()=>{if(!running||converged){clearInterval(intId);intId=null;updateCtrls();return}doOneStep()},sp)}
+  else{if(intId){clearInterval(intId);intId=null}}
+  updateCtrls();
+}
+function resetSim(){initSim()}
+
+// ── UI ──
+function drawMinis(){
+  const bar=document.getElementById('pat-bar');
+  bar.innerHTML='<span class="label">Click letters to add/remove from memory (recommended order for best capacity):</span>';
+  ORDER.forEach(k=>{
+    const d=document.createElement('div');
+    d.className='mini'+(activeKeys.includes(k)?'':' off');
+    d.onclick=()=>{if(activeKeys.includes(k)){if(activeKeys.length>1)activeKeys=activeKeys.filter(x=>x!==k)}else{activeKeys.push(k)}initSim()};
+    const cv=document.createElement('canvas');cv.width=36;cv.height=36;
+    const sel=activeKeys.includes(k);
+    cv.style.border=sel?`2px solid ${PCOL[k]}`:'1.5px solid #ddd';
+    const ctx=cv.getContext('2d');const pat=LETS[k](),cl=3.6;
+    ctx.fillStyle='#fafafa';ctx.fillRect(0,0,36,36);
+    for(let i=0;i<N;i++){const r=Math.floor(i/G),c=i%G;ctx.fillStyle=pat[i]===1?'#1a3a5c':'#f0f0f0';ctx.fillRect(c*cl,r*cl,cl,cl)}
+    d.appendChild(cv);
+    const lb=document.createElement('div');lb.className='mlbl';lb.style.color=sel?PCOL[k]:'#aaa';lb.textContent=k;
+    d.appendChild(lb);bar.appendChild(d);
+  });
+}
+function drawTgtSelect(){
+  const c=document.getElementById('tgt-select');
+  c.innerHTML='<span style="font-size:10px;font-weight:600;color:#666">Retrieve:</span>';
+  activeKeys.forEach(k=>{
+    const b=document.createElement('button');b.className='tgt-btn'+(k===targetKey?' active':'');
+    b.textContent=k;b.style.borderColor=k===targetKey?PCOL[k]:'#ccc';
+    if(k===targetKey){b.style.background=PCOL[k];b.style.color='#fff'}
+    b.onclick=()=>{targetKey=k;initSim()};
+    c.appendChild(b);
+  });
+}
+function drawStatus(){
+  const M=activeKeys.length,alpha=(M/N).toFixed(3);
+  const el=document.getElementById('status-bar');
+  let cls='ok',txt=`M = ${M} patterns · α = ${alpha} · Retrieval: reliable ✓`;
+  if(M/N>0.12){cls='warn';txt=`M = ${M} patterns · α = ${alpha} · Approaching capacity limit ⚠`}
+  if(M/N>0.138){cls='bad';txt=`M = ${M} patterns · α = ${alpha} · Beyond α_c ≈ 0.138 — expect retrieval failures ✗`}
+  if(M<2){cls='bad';txt=`M = ${M} pattern · Need at least 2 patterns for a meaningful demo`}
+  el.className='status-bar '+cls;el.textContent=txt;
+}
+function drawGrid(){
+  const cv=document.getElementById('grid-cv'),ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);ctx.fillStyle='#fafafa';ctx.fillRect(0,0,cv.width,cv.height);
+  for(let i=0;i<N;i++){
+    const r=Math.floor(i/G),c=i%G,x=c*CELL+1,y=r*CELL+1;
+    let fill=state[i]===1?'#1a3a5c':'#f0f0f0',stroke='#ccc',sw=0.5;
+    if(i===aN&&i!==jF){stroke='#e67e22';sw=2.5}
+    if(i===jF){fill='#e67e22';stroke='#e67e22';sw=2.5}
+    ctx.fillStyle=fill;ctx.beginPath();ctx.roundRect(x,y,CELL,CELL,2);ctx.fill();
+    ctx.strokeStyle=stroke;ctx.lineWidth=sw;ctx.stroke();
+  }
+}
+function drawOverlaps(){
+  const c=document.getElementById('ovlp-bars');c.innerHTML='';
+  activeKeys.forEach(k=>{
+    const v=overlaps[k]||0,av=Math.abs(v);
+    const d=document.createElement('div');d.className='ovlp-row';
+    d.innerHTML=`<span style="color:${PCOL[k]};font-weight:600;width:22px">${k}</span><div class="ovlp-bar"><div class="ovlp-fill" style="width:${av*100}%;background:${PCOL[k]}"></div></div><span style="color:${av>0.9?PCOL[k]:'#999'};font-weight:600;width:38px;text-align:right">${v.toFixed(2)}</span>`;
+    c.appendChild(d);
+  });
+}
+function drawChart(){
+  const cv=document.getElementById('chart-cv'),ctx=cv.getContext('2d');
+  const cw=cv.width,ch=cv.height,pad={t:14,r:10,b:22,l:42},pw=cw-pad.l-pad.r,ph=ch-pad.t-pad.b;
+  ctx.clearRect(0,0,cw,ch);ctx.fillStyle='#fafafa';ctx.fillRect(0,0,cw,ch);
+  const allE=eHist.length?eHist:[0];
+  const tgtE=energy(LETS[targetKey](),W);
+  const mn=Math.min(tgtE-2,...allE),mx=Math.max(...allE)+2,rn=mx-mn||1;
+  ctx.strokeStyle='#999';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(pad.l,pad.t);ctx.lineTo(pad.l,pad.t+ph);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(pad.l,pad.t+ph);ctx.lineTo(pad.l+pw,pad.t+ph);ctx.stroke();
+  const ty=pad.t+(1-(tgtE-mn)/rn)*ph;
+  ctx.strokeStyle=PCOL[targetKey];ctx.lineWidth=1.5;ctx.setLineDash([5,3]);
+  ctx.beginPath();ctx.moveTo(pad.l,ty);ctx.lineTo(pad.l+pw,ty);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle=PCOL[targetKey];ctx.font='8px monospace';ctx.fillText(`E(${targetKey})`,pad.l+pw+1,ty+3);
+  if(allE.length>1){ctx.strokeStyle='#1a3a5c';ctx.lineWidth=1.5;ctx.beginPath();
+    allE.forEach((e,i)=>{const x=pad.l+(i/Math.max(allE.length-1,1))*pw,y=pad.t+(1-(e-mn)/rn)*ph;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)});ctx.stroke()}
+  const lx=pad.l+((allE.length-1)/Math.max(allE.length-1,1))*pw,ly=pad.t+(1-(allE[allE.length-1]-mn)/rn)*ph;
+  ctx.fillStyle='#e67e22';ctx.beginPath();ctx.arc(lx,ly,3,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle='#666';ctx.font='8px monospace';ctx.textAlign='end';
+  ctx.fillText(mx.toFixed(0),pad.l-3,pad.t+4);ctx.fillText(mn.toFixed(0),pad.l-3,pad.t+ph+4);
+  ctx.textAlign='center';ctx.fillText('step',pad.l+pw/2,ch-3);
+}
+function updateCtrls(){
+  const br=document.getElementById('btn-run');
+  br.textContent=running?'⏸ Pause':'▶ Run';br.className='btn btn-run'+(running?' on':'');
+  br.disabled=converged||activeKeys.length<2;
+  document.getElementById('btn-step').disabled=running||converged||activeKeys.length<2;
+}
+function updateAll(){
+  drawMinis();drawTgtSelect();drawStatus();drawGrid();drawOverlaps();drawChart();
+  document.getElementById('step-ct').textContent=stepCt;
+  document.getElementById('e-val').textContent=eHist[eHist.length-1]?.toFixed(1);
+  const cm=document.getElementById('conv-msg');
+  if(converged&&convergedTo){cm.style.display='block';cm.style.color=PCOL[convergedTo]||'#2ecc71';cm.textContent=`✓ Converged to ${convergedTo}`+(convergedTo!==targetKey?' (WRONG — crosstalk!)':'')}
+  else cm.style.display='none';
+  updateCtrls();
+}
+document.getElementById('corr-sl').addEventListener('input',function(){corrPct=+this.value;document.getElementById('corr-v').textContent=corrPct+'%';initSim()});
+document.getElementById('sp-sl').addEventListener('input',function(){if(running){clearInterval(intId);intId=setInterval(()=>{if(!running||converged){clearInterval(intId);intId=null;updateCtrls();return}doOneStep()},+this.value)}});
+initSim();
+</script>
+</body>
+</html>

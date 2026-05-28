@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hopfield Digit Lab — Retrieval vs Spin-Glass</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #f5f5f0;
+    color: #1a1a1a;
+    line-height: 1.5;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #1a1a1a; color: #e0dfd8; }
+    .card { background: #242422 !important; border-color: #3a3a38 !important; }
+    .section-bg { background: #2c2c2a !important; }
+    button { background: #2c2c2a !important; color: #e0dfd8 !important; border-color: #4a4a48 !important; }
+    button:hover { background: #3a3a38 !important; }
+    .btn-primary { background: #1a3a5c !important; color: #85b7eb !important; border-color: #2a5a8c !important; }
+    .btn-danger { background: #3a1a1a !important; color: #f09595 !important; border-color: #6a2a2a !important; }
+    select, input[type="range"] { background: #2c2c2a; color: #e0dfd8; border-color: #4a4a48; }
+    .text-primary { color: #e0dfd8 !important; }
+    .text-secondary { color: #a0a098 !important; }
+    .text-tertiary { color: #78786e !important; }
+    .letter-btn { background: #2c2c2a !important; color: #a0a098 !important; border-color: #4a4a48 !important; }
+    .letter-btn.active { background: #1a3a5c !important; color: #85b7eb !important; border-color: #378add !important; }
+    .overlap-track { background: #2c2c2a !important; }
+    .mono { color: #a0a098 !important; }
+  }
+  .app-wrap {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 16px;
+  }
+  h1 {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .subtitle {
+    font-size: 13px;
+    color: #6a6a60;
+    margin-bottom: 20px;
+  }
+  .card {
+    background: #fff;
+    border: 1px solid #e0e0da;
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 16px;
+  }
+  .section-bg {
+    background: #eeeee8;
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .section-label {
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 6px;
+  }
+  .text-primary { color: #1a1a1a; }
+  .text-secondary { color: #6a6a60; }
+  .text-tertiary { color: #9a9a90; }
+  button {
+    font-family: inherit;
+    cursor: pointer;
+    border: 1px solid #d0d0ca;
+    border-radius: 6px;
+    background: #fff;
+    color: #1a1a1a;
+    padding: 6px 14px;
+    font-size: 13px;
+    transition: background 0.15s;
+  }
+  button:hover { background: #f0f0ea; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  .btn-primary {
+    background: #e6f1fb;
+    color: #185fa5;
+    border-color: #85b7eb;
+    font-weight: 500;
+  }
+  .btn-primary:hover { background: #d0e4f6; }
+  .btn-danger {
+    background: #fcebeb;
+    color: #a32d2d;
+    border-color: #f09595;
+    font-weight: 500;
+  }
+  .btn-danger:hover { background: #f7d4d4; }
+  .letter-btn {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    font-size: 14px;
+    font-weight: 500;
+    border-radius: 6px;
+    color: #6a6a60;
+    border: 1px solid #d0d0ca;
+    background: #fff;
+  }
+  .letter-btn.active {
+    background: #e6f1fb;
+    color: #185fa5;
+    border: 2px solid #378add;
+  }
+  select {
+    font-family: inherit;
+    font-size: 13px;
+    padding: 5px 8px;
+    border: 1px solid #d0d0ca;
+    border-radius: 6px;
+    background: #fff;
+  }
+  .overlap-track {
+    background: #eeeee8;
+    height: 10px;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .overlap-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.2s;
+  }
+  .mono {
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    font-size: 11px;
+    color: #6a6a60;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useCallback, useRef } = React;
+
+const N = 100;
+const COLS = 10;
+
+const DIGIT_BITMAPS = {
+  0: ["0001111000","0011001100","0110000110","0110010110","0110100110","0110000110","0110000110","0011001100","0001111000","0000000000"],
+  1: ["0000110000","0001110000","0010110000","0000110000","0000110000","0000110000","0000110000","0000110000","0011111100","0000000000"],
+  2: ["0011111000","0110001100","0000001100","0000011000","0000110000","0001100000","0011000000","0110000000","0111111110","0000000000"],
+  3: ["0011111000","0110001100","0000001100","0001111000","0000001100","0000001100","0000001100","0110001100","0011111000","0000000000"],
+  4: ["0000011000","0000111000","0001101000","0011001000","0110001000","0111111110","0000001000","0000001000","0000001000","0000000000"],
+  5: ["0111111110","0110000000","0110000000","0111111000","0000001100","0000000110","0000000110","0110001100","0011111000","0000000000"],
+  6: ["0001111000","0011001100","0110000000","0110000000","0111111000","0110001100","0110000110","0011001100","0001111000","0000000000"],
+  7: ["0111111110","0000000110","0000001100","0000011000","0000110000","0000110000","0001100000","0001100000","0001100000","0000000000"],
+  8: ["0001111000","0011001100","0110000110","0011001100","0001111000","0011001100","0110000110","0011001100","0001111000","0000000000"],
+  9: ["0001111000","0011001100","0110000110","0011001100","0001111100","0000000110","0000000110","0011001100","0001111000","0000000000"],
+};
+
+function bitmapToPattern(bitmap) {
+  const p = [];
+  for (const row of bitmap) for (const ch of row) p.push(ch === "1" ? 1 : -1);
+  return p;
+}
+
+const PATTERNS = {};
+for (const [k, v] of Object.entries(DIGIT_BITMAPS)) PATTERNS[k] = bitmapToPattern(v);
+const ALL_DIGITS = Object.keys(PATTERNS);
+
+function computeWeights(selectedLetters) {
+  const W = new Float64Array(N * N);
+  for (const letter of selectedLetters) {
+    const xi = PATTERNS[letter];
+    for (let i = 0; i < N; i++) {
+      for (let j = i + 1; j < N; j++) {
+        const val = (xi[i] * xi[j]) / N;
+        W[i * N + j] += val;
+        W[j * N + i] += val;
+      }
+    }
+  }
+  for (let i = 0; i < N; i++) W[i * N + i] = 0;
+  return W;
+}
+
+function localField(W, s, i) {
+  let h = 0;
+  for (let j = 0; j < N; j++) h += W[i * N + j] * s[j];
+  return h;
+}
+
+function overlap(s, xi) {
+  let sum = 0;
+  for (let i = 0; i < N; i++) sum += s[i] * xi[i];
+  return sum / N;
+}
+
+function corruptPattern(pattern, fraction) {
+  const s = [...pattern];
+  const nFlip = Math.round(fraction * N);
+  const indices = Array.from({ length: N }, (_, i) => i);
+  for (let i = N - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [indices[i], indices[j]] = [indices[j], indices[i]];
+  }
+  for (let k = 0; k < nFlip; k++) s[indices[k]] *= -1;
+  return s;
+}
+
+function randomState() {
+  return Array.from({ length: N }, () => (Math.random() < 0.5 ? 1 : -1));
+}
+
+const UP = "#3b7dd8";
+const DN = "#d4503a";
+
+function SpinGrid({ state, size, label, border, dim }) {
+  size = size || 200;
+  const cellSize = size / COLS;
+  return (
+    <div style={{ textAlign: "center" }}>
+      <div style={{
+        display: "inline-grid",
+        gridTemplateColumns: `repeat(${COLS}, ${cellSize}px)`,
+        gridTemplateRows: `repeat(${COLS}, ${cellSize}px)`,
+        border: border || "1px solid #d0d0ca",
+        borderRadius: 6,
+        overflow: "hidden",
+        opacity: dim ? 0.5 : 1,
+      }}>
+        {state.map((v, i) => (
+          <div key={i} style={{
+            width: cellSize,
+            height: cellSize,
+            background: v === 1 ? UP : DN,
+            transition: "background 0.15s",
+          }} />
+        ))}
+      </div>
+      {label && <div style={{ fontSize: 12 }} className="text-secondary">{label}</div>}
+    </div>
+  );
+}
+
+function OverlapBar({ letter, value, isMax }) {
+  const absVal = Math.abs(value);
+  const pct = Math.round(absVal * 100);
+  const barColor = isMax && absVal > 0.5 ? "#2d8a4e" : absVal > 0.3 ? "#b8860b" : "#b0b0a8";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, marginBottom: 3 }}>
+      <span style={{ width: 16, fontWeight: 500 }} className="text-primary">{letter}</span>
+      <div className="overlap-track" style={{ flex: 1 }}>
+        <div className="overlap-fill" style={{ width: `${pct}%`, background: barColor }} />
+      </div>
+      <span className="mono" style={{ width: 44, textAlign: "right" }}>
+        {value >= 0 ? "+" : ""}{value.toFixed(2)}
+      </span>
+    </div>
+  );
+}
+
+function App() {
+  const [selected, setSelected] = useState(["0", "1"]);
+  const [state, setState] = useState(PATTERNS["0"]);
+  const [running, setRunning] = useState(false);
+  const [steps, setSteps] = useState(0);
+  const [converged, setConverged] = useState(false);
+  const [noiseLevel, setNoiseLevel] = useState(30);
+  const [initLetter, setInitLetter] = useState("0");
+  const runRef = useRef(false);
+  const weightsRef = useRef(null);
+
+  const alpha = selected.length / N;
+
+  const toggleLetter = (l) => {
+    setSelected((prev) =>
+      prev.includes(l) ? prev.filter((x) => x !== l) : [...prev, l]
+    );
+    setConverged(false);
+    setSteps(0);
+  };
+
+  const overlaps = selected.map((l) => ({
+    letter: l,
+    value: overlap(state, PATTERNS[l]),
+  }));
+
+  const maxOverlap = overlaps.reduce(
+    (best, o) => (Math.abs(o.value) > Math.abs(best.value) ? o : best),
+    { letter: "", value: 0 }
+  );
+
+  let phaseLabel = "—";
+  let phaseColor = "#6a6a60";
+  if (converged && overlaps.length > 0) {
+    if (Math.abs(maxOverlap.value) > 0.7) {
+      phaseLabel = "Retrieval \u2192 " + maxOverlap.letter;
+      phaseColor = "#2d8a4e";
+    } else if (Math.abs(maxOverlap.value) > 0.4) {
+      phaseLabel = "Partial retrieval";
+      phaseColor = "#b8860b";
+    } else {
+      phaseLabel = "Spin-glass state";
+      phaseColor = "#c0392b";
+    }
+  }
+
+  const initFromPattern = useCallback(() => {
+    if (!PATTERNS[initLetter]) return;
+    setState(corruptPattern(PATTERNS[initLetter], noiseLevel / 100));
+    setConverged(false);
+    setSteps(0);
+  }, [initLetter, noiseLevel]);
+
+  const initRandom = useCallback(() => {
+    setState(randomState());
+    setConverged(false);
+    setSteps(0);
+  }, []);
+
+  const runDynamics = useCallback(() => {
+    if (selected.length === 0) return;
+    weightsRef.current = computeWeights(selected);
+    runRef.current = true;
+    setRunning(true);
+    setConverged(false);
+
+    let s = [...state];
+    let stepCount = steps;
+    let unchanged = 0;
+
+    const tick = () => {
+      if (!runRef.current) { setRunning(false); return; }
+      const W = weightsRef.current;
+      let changed = false;
+      const order = Array.from({ length: N }, (_, i) => i);
+      for (let k = N - 1; k > 0; k--) {
+        const j = Math.floor(Math.random() * (k + 1));
+        [order[k], order[j]] = [order[j], order[k]];
+      }
+      for (const i of order) {
+        const h = localField(W, s, i);
+        const newVal = h >= 0 ? 1 : -1;
+        if (newVal !== s[i]) { s[i] = newVal; changed = true; }
+      }
+      stepCount++;
+      setState([...s]);
+      setSteps(stepCount);
+
+      if (!changed) {
+        unchanged++;
+        if (unchanged >= 2) {
+          runRef.current = false;
+          setRunning(false);
+          setConverged(true);
+          return;
+        }
+      } else { unchanged = 0; }
+
+      if (stepCount > 200) {
+        runRef.current = false;
+        setRunning(false);
+        setConverged(true);
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }, [selected, state, steps]);
+
+  const stopDynamics = useCallback(() => {
+    runRef.current = false;
+    setRunning(false);
+  }, []);
+
+  return (
+    <div className="app-wrap">
+      <h1>Hopfield digit lab</h1>
+      <p className="subtitle">
+        Store digits 0–9 as Hebbian patterns in a 10×10 Hopfield network.
+        Observe retrieval at low α and spin-glass states at high α.
+      </p>
+
+      {/* Letter selector */}
+      <div className="card">
+        <div className="section-label text-primary">
+          Stored patterns
+          <span className="text-secondary" style={{ fontWeight: 400, marginLeft: 8 }}>
+            {selected.length} digits, α = {alpha.toFixed(3)}
+          </span>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
+          {ALL_DIGITS.map((l) => (
+            <button
+              key={l}
+              className={"letter-btn" + (selected.includes(l) ? " active" : "")}
+              onClick={() => toggleLetter(l)}
+            >{l}</button>
+          ))}
+        </div>
+        <div style={{ fontSize: 11 }} className="text-tertiary">
+          AGS capacity ≈ 14 for random patterns with N = 100.
+          All 10 digits gives α = 0.1 — below α_c, but bias and correlation
+          in the shapes push the effective threshold lower. Try 2–3 for retrieval, then 7+ to see failures.
+        </div>
+
+        {/* Stored pattern thumbnails */}
+        {selected.length > 0 && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+            {selected.map((l) => (
+              <SpinGrid key={l} state={PATTERNS[l]} size={50} label={l} dim />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Init controls */}
+      <div className="card">
+        <div className="section-label text-primary" style={{ marginBottom: 8 }}>
+          Initial state
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+          <select value={initLetter} onChange={(e) => setInitLetter(e.target.value)}>
+            {selected.map((l) => <option key={l} value={l}>{l}</option>)}
+          </select>
+          <span className="text-secondary" style={{ fontSize: 12 }}>with</span>
+          <input
+            type="range" min={0} max={50} step={5} value={noiseLevel}
+            onChange={(e) => setNoiseLevel(+e.target.value)}
+            style={{ width: 100 }}
+          />
+          <span className="text-secondary" style={{ fontSize: 12, minWidth: 50 }}>
+            {noiseLevel}% noise
+          </span>
+          <button onClick={initFromPattern}>Set corrupted</button>
+          <button onClick={initRandom}>Random init</button>
+          <div style={{ flex: 1 }} />
+          {!running ? (
+            <button className="btn-primary" onClick={runDynamics} disabled={selected.length === 0}>
+              ▶ Run dynamics
+            </button>
+          ) : (
+            <button className="btn-danger" onClick={stopDynamics}>
+              ■ Stop
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Main display */}
+      <div className="card" style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "start" }}>
+        {/* Network state */}
+        <div>
+          <SpinGrid
+            state={state}
+            size={240}
+            border={converged ? `3px solid ${phaseColor}` : "1px solid #d0d0ca"}
+          />
+          <div style={{ textAlign: "center", marginTop: 8, fontSize: 12 }} className="text-secondary">
+            Sweep {steps}{converged && " · converged"}
+          </div>
+          {converged && (
+            <div style={{ textAlign: "center", marginTop: 4, fontSize: 15, fontWeight: 600, color: phaseColor }}>
+              {phaseLabel}
+            </div>
+          )}
+        </div>
+
+        {/* Overlaps */}
+        <div style={{ flex: 1, minWidth: 200 }}>
+          <div className="section-label text-primary" style={{ marginBottom: 8 }}>
+            Overlaps m<sup>μ</sup> with stored patterns
+          </div>
+          {overlaps.length === 0 ? (
+            <div className="text-tertiary" style={{ fontSize: 12 }}>No patterns stored</div>
+          ) : (
+            overlaps.map((o) => (
+              <OverlapBar
+                key={o.letter}
+                letter={o.letter}
+                value={o.value}
+                isMax={o.letter === maxOverlap.letter}
+              />
+            ))
+          )}
+
+          {overlaps.length > 0 && (
+            <div className="section-bg" style={{ marginTop: 16, fontSize: 12, lineHeight: 1.8 }}>
+              <span className="text-secondary">max |m<sup>μ</sup>| = </span>
+              <span className="mono" style={{ fontWeight: 600, fontSize: 13 }}>
+                {Math.abs(maxOverlap.value).toFixed(3)}
+              </span>
+              <br />
+              <span className="text-secondary">Best match: </span>
+              <span style={{ fontWeight: 500 }} className="text-primary">
+                {maxOverlap.letter || "—"}
+                {maxOverlap.value < 0 ? " (negated)" : ""}
+              </span>
+              <div style={{ marginTop: 10, borderTop: "1px solid #d0d0ca", paddingTop: 8, lineHeight: 1.6 }} className="text-tertiary">
+                <strong style={{ fontWeight: 500 }}>Reading the result:</strong><br />
+                |m| {">"} 0.7 → retrieval (green border)<br />
+                0.4 {"<"} |m| {"<"} 0.7 → partial retrieval<br />
+                |m| {"<"} 0.4 for all μ → spin-glass state (red border)
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

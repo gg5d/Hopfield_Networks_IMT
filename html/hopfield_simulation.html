@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hopfield Network · Multi-Pattern Retrieval</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'IBM Plex Mono', 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    background: #fff; color: #1a1a1a;
+    padding: 20px; max-width: 880px; margin: 0 auto;
+  }
+  h2 { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 3px; }
+  .subtitle { font-size: 11.5px; color: #666; margin-bottom: 14px; }
+  .top-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 8px 10px; background: rgba(0,0,0,0.02); border-radius: 6px; margin-bottom: 14px;
+  }
+  .top-bar .label { font-size: 11px; font-weight: 600; color: #666; }
+  .mini-grid { cursor: pointer; text-align: center; transition: transform 0.15s; }
+  .mini-grid.selected { transform: scale(1.08); }
+  .mini-grid canvas { border-radius: 4px; display: block; }
+  .mini-label { font-size: 12px; margin-top: 3px; }
+  .main-area { display: flex; gap: 20px; flex-wrap: wrap; }
+  .grid-panel canvas { border: 1px solid #ddd; border-radius: 4px; }
+  .stats { display: flex; justify-content: space-between; margin-top: 6px; font-size: 12px; }
+  .converged-msg { margin-top: 4px; font-size: 13px; font-weight: 700; text-align: center; }
+  .right-panel { flex: 1; min-width: 280px; }
+  .section-label { font-size: 11px; font-weight: 600; color: #666; margin-bottom: 5px; }
+  .overlap-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
+  .overlap-label { font-size: 12px; font-weight: 600; width: 28px; }
+  .overlap-bg { width: 110px; height: 12px; background: #eee; border-radius: 3px; overflow: hidden; }
+  .overlap-fill { height: 100%; border-radius: 3px; opacity: 0.7; transition: width 0.1s; }
+  .overlap-val { font-size: 12px; font-weight: 600; width: 42px; text-align: right; }
+  .chart-container { margin-bottom: 10px; }
+  .chart-container canvas { border: 1px solid #e0e0e0; border-radius: 4px; }
+  .controls { display: flex; gap: 7px; flex-wrap: wrap; align-items: center; }
+  .btn {
+    padding: 6px 16px; font-size: 12px; font-weight: 700; font-family: inherit;
+    border-radius: 5px; cursor: pointer; transition: all 0.15s; border: 2px solid;
+  }
+  .btn-run { border-color: #1a3a5c; background: transparent; color: #1a3a5c; }
+  .btn-run.active { background: #1a3a5c; color: #fff; }
+  .btn-run:disabled { opacity: 0.4; cursor: default; }
+  .btn-step { border-color: #888; background: transparent; color: #444; font-weight: 600; }
+  .btn-step:disabled { opacity: 0.4; cursor: default; }
+  .btn-reset { border-color: #c0392b; background: transparent; color: #c0392b; font-weight: 600; }
+  .speed-row { display: flex; align-items: center; gap: 5px; margin-left: 6px; }
+  .speed-row span { font-size: 10px; color: #666; }
+  .speed-row input { width: 70px; accent-color: #1a3a5c; }
+  .legend {
+    margin-top: 12px; padding: 8px 10px; background: rgba(0,0,0,0.025);
+    border-radius: 5px; font-size: 10.5px; line-height: 1.7; color: #666;
+  }
+  .legend-swatch {
+    display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle;
+  }
+  .corr-control { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  .corr-control span { font-size: 11px; color: #666; }
+  .corr-control input { width: 70px; accent-color: #1a3a5c; }
+  .corr-val { font-size: 12px; font-weight: 600; min-width: 30px; }
+</style>
+</head>
+<body>
+
+<h2>Hopfield Network · Multi-Pattern Retrieval</h2>
+<p class="subtitle">4 stored patterns (A, B, D, H) · N=100 · Hebbian weights · asynchronous updates</p>
+
+<div class="top-bar">
+  <span class="label">Stored patterns — click to select target:</span>
+  <div id="mini-grids" style="display:flex;gap:10px;"></div>
+  <div class="corr-control">
+    <span>Corruption:</span>
+    <input type="range" id="corr-slider" min="5" max="50" value="30">
+    <span class="corr-val" id="corr-val">30%</span>
+  </div>
+</div>
+
+<div class="main-area">
+  <div class="grid-panel">
+    <canvas id="grid-canvas" width="362" height="362"></canvas>
+    <div class="stats">
+      <span>Step: <strong id="step-count">0</strong></span>
+      <span style="color:#666">E = <span id="energy-val">0</span></span>
+    </div>
+    <div class="converged-msg" id="converged-msg" style="display:none"></div>
+  </div>
+
+  <div class="right-panel">
+    <div style="margin-bottom:12px">
+      <div class="section-label">Overlap m<sup>μ</sup> with each stored pattern</div>
+      <div id="overlap-bars"></div>
+    </div>
+    <div class="chart-container">
+      <div class="section-label">Energy E(s)</div>
+      <canvas id="chart-canvas" width="340" height="140"></canvas>
+    </div>
+    <div class="controls">
+      <button class="btn btn-run" id="btn-run" onclick="toggleRun()">▶ Run</button>
+      <button class="btn btn-step" id="btn-step" onclick="doStep()">Step</button>
+      <button class="btn btn-reset" onclick="resetSim()">Reset</button>
+      <div class="speed-row">
+        <span>Fast</span>
+        <input type="range" id="speed-slider" min="10" max="300" value="80">
+        <span>Slow</span>
+      </div>
+    </div>
+    <div class="legend">
+      <div>
+        <span class="legend-swatch" style="background:#1a3a5c"></span> s_i = +1 &nbsp;
+        <span class="legend-swatch" style="background:#f0f0f0;border:1px solid #ccc"></span> s_i = −1 &nbsp;
+        <span class="legend-swatch" style="background:#e67e22"></span> updating / flipped
+      </div>
+      <div style="margin-top:4px">W = (1/N) Σ_μ ξ<sup>μ</sup>(ξ<sup>μ</sup>)ᵀ with 4 patterns stored</div>
+      <div>Update: s_i ← sign(Σ_j w_ij s_j), one neuron per step</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Constants ─────────────────────────────────────────────
+const N = 100, GRID = 10, CELL = 36;
+const PCOLORS = { A: "#2980b9", B: "#8e44ad", D: "#d35400", H: "#27ae60" };
+const PKEYS = ["A", "B", "D", "H"];
+
+// ── Pattern definitions ───────────────────────────────────
+function makeP(coords) {
+  const p = new Array(N).fill(-1);
+  for (const [r,c] of coords) if (r>=0&&r<10&&c>=0&&c<10) p[r*10+c]=1;
+  return p;
+}
+function makeA() {
+  const c=[];
+  for(let r=1;r<=8;r++){c.push([r,2]);c.push([r,7]);}
+  for(let k=3;k<=6;k++){c.push([1,k]);c.push([5,k]);}
+  return makeP(c);
+}
+function makeB() {
+  const c=[];
+  for(let r=1;r<=8;r++) c.push([r,2]);
+  for(let k=3;k<=6;k++){c.push([1,k]);c.push([5,k]);c.push([8,k]);}
+  for(let r=2;r<=4;r++) c.push([r,7]);
+  for(let r=6;r<=7;r++) c.push([r,7]);
+  return makeP(c);
+}
+function makeD() {
+  const c=[];
+  for(let r=1;r<=8;r++) c.push([r,2]);
+  for(let k=3;k<=5;k++){c.push([1,k]);c.push([8,k]);}
+  c.push([2,6],[3,7],[4,7],[5,7],[6,7],[7,6]);
+  return makeP(c);
+}
+function makeH() {
+  const c=[];
+  for(let r=1;r<=8;r++){c.push([r,2]);c.push([r,7]);}
+  for(let k=3;k<=6;k++) c.push([5,k]);
+  return makeP(c);
+}
+const PFNS = { A:makeA, B:makeB, D:makeD, H:makeH };
+const ALL_P = PKEYS.map(k => PFNS[k]());
+
+// ── Hopfield core ─────────────────────────────────────────
+function hebbW(patterns) {
+  const W = Array.from({length:N}, ()=>new Float64Array(N));
+  for(const p of patterns) for(let i=0;i<N;i++) for(let j=0;j<N;j++) if(i!==j) W[i][j]+=(p[i]*p[j])/N;
+  return W;
+}
+function energy(s,W) { let E=0; for(let i=0;i<N;i++) for(let j=i+1;j<N;j++) E-=W[i][j]*s[i]*s[j]; return E; }
+function lfield(s,W,i) { let h=0; for(let j=0;j<N;j++) h+=W[i][j]*s[j]; return h; }
+function ovlp(s,p) { let d=0; for(let i=0;i<N;i++) d+=s[i]*p[i]; return d/N; }
+
+function mulberry32(a) {
+  return function(){a|=0;a=(a+0x6d2b79f5)|0;let t=Math.imul(a^(a>>>15),1|a);
+  t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;};
+}
+function corrupt(p,n,rng) {
+  const s=[...p], idx=Array.from({length:N},(_,i)=>i);
+  for(let i=idx.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[idx[i],idx[j]]=[idx[j],idx[i]];}
+  for(let k=0;k<n;k++) s[idx[k]]*=-1; return s;
+}
+function randOrder(rng) {
+  const o=Array.from({length:N},(_,i)=>i);
+  for(let i=o.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[o[i],o[j]]=[o[j],o[i]];}
+  return o;
+}
+
+// ── State ─────────────────────────────────────────────────
+const W = hebbW(ALL_P);
+let rng, state, eHist, overlaps, stepCount, running=false, converged=false, convergedTo=null;
+let activeNeuron=-1, justFlipped=-1, queue=[], qIdx=0, intervalId=null;
+let selectedPattern="A", corruptionPct=30;
+
+// ── Init ──────────────────────────────────────────────────
+function initSim(pk, cp) {
+  selectedPattern=pk; corruptionPct=cp;
+  rng=mulberry32(42+pk.charCodeAt(0));
+  const pat=PFNS[pk]();
+  state=corrupt(pat, Math.round(cp/100*N), rng);
+  eHist=[energy(state,W)];
+  overlaps={}; PKEYS.forEach(k=>{overlaps[k]=ovlp(state,PFNS[k]());});
+  stepCount=0; running=false; converged=false; convergedTo=null;
+  activeNeuron=-1; justFlipped=-1;
+  queue=randOrder(rng); qIdx=0;
+  if(intervalId){clearInterval(intervalId);intervalId=null;}
+  updateUI();
+}
+
+function doOneStep() {
+  if(converged) return;
+  if(qIdx>=queue.length){queue=randOrder(rng);qIdx=0;}
+  const ni=queue[qIdx]; activeNeuron=ni;
+  const h=lfield(state,W,ni);
+  const nv=h>=0?1:-1;
+  const fl=nv!==state[ni];
+  if(fl){state[ni]=nv;justFlipped=ni;}else{justFlipped=-1;}
+  eHist.push(energy(state,W));
+  PKEYS.forEach(k=>{overlaps[k]=ovlp(state,PFNS[k]());});
+  stepCount++; qIdx++;
+  const best=PKEYS.reduce((a,k)=>overlaps[k]>overlaps[a]?k:a,PKEYS[0]);
+  if(Math.abs(overlaps[best])>=0.98){
+    converged=true; running=false; activeNeuron=-1;
+    convergedTo=overlaps[best]>0?best:`−${best}`;
+    if(intervalId){clearInterval(intervalId);intervalId=null;}
+  }
+  updateUI();
+}
+
+function doStep(){if(!running&&!converged) doOneStep();}
+
+function toggleRun() {
+  if(converged) return;
+  running=!running;
+  if(running){
+    const sp=parseInt(document.getElementById('speed-slider').value);
+    intervalId=setInterval(()=>{
+      if(!running||converged){clearInterval(intervalId);intervalId=null;updateRunBtn();return;}
+      doOneStep();
+    }, sp);
+  } else { if(intervalId){clearInterval(intervalId);intervalId=null;} }
+  updateRunBtn();
+}
+
+function resetSim(){initSim(selectedPattern,corruptionPct);}
+
+// ── Drawing ───────────────────────────────────────────────
+function drawGrid() {
+  const cv=document.getElementById('grid-canvas'), ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.fillStyle='#fafafa'; ctx.fillRect(0,0,cv.width,cv.height);
+  for(let idx=0;idx<N;idx++){
+    const r=Math.floor(idx/GRID), c=idx%GRID;
+    const x=c*CELL+1, y=r*CELL+1;
+    let fill=state[idx]===1?'#1a3a5c':'#f0f0f0';
+    let stroke='#ccc', sw=0.5;
+    if(idx===activeNeuron&&idx!==justFlipped){stroke='#e67e22';sw=2.5;}
+    if(idx===justFlipped){fill='#e67e22';stroke='#e67e22';sw=2.5;}
+    ctx.fillStyle=fill;
+    ctx.beginPath(); ctx.roundRect(x,y,CELL,CELL,2); ctx.fill();
+    ctx.strokeStyle=stroke; ctx.lineWidth=sw; ctx.stroke();
+  }
+}
+
+function drawChart() {
+  const cv=document.getElementById('chart-canvas'), ctx=cv.getContext('2d');
+  const cw=cv.width, ch=cv.height;
+  const pad={t:16,r:12,b:26,l:46}, pw=cw-pad.l-pad.r, ph=ch-pad.t-pad.b;
+  ctx.clearRect(0,0,cw,ch);
+  ctx.fillStyle='#fafafa'; ctx.fillRect(0,0,cw,ch);
+
+  const allE=eHist.length?eHist:[0];
+  const tgtE=energy(PFNS[selectedPattern](),W);
+  const mnE=Math.min(tgtE-2,...allE), mxE=Math.max(...allE)+2, rng=mxE-mnE||1;
+
+  // Axes
+  ctx.strokeStyle='#999'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(pad.l,pad.t); ctx.lineTo(pad.l,pad.t+ph); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(pad.l,pad.t+ph); ctx.lineTo(pad.l+pw,pad.t+ph); ctx.stroke();
+
+  // Target dashed line
+  const tgtY=pad.t+(1-(tgtE-mnE)/rng)*ph;
+  ctx.strokeStyle=PCOLORS[selectedPattern]; ctx.lineWidth=1.5; ctx.setLineDash([5,3]);
+  ctx.beginPath(); ctx.moveTo(pad.l,tgtY); ctx.lineTo(pad.l+pw,tgtY); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle=PCOLORS[selectedPattern]; ctx.font='8px monospace';
+  ctx.fillText(`E(ξ${selectedPattern})`,pad.l+pw+2,tgtY+3);
+
+  // Energy line
+  if(allE.length>1){
+    ctx.strokeStyle='#1a3a5c'; ctx.lineWidth=1.8;
+    ctx.beginPath();
+    allE.forEach((e,i)=>{
+      const x=pad.l+(i/Math.max(allE.length-1,1))*pw;
+      const y=pad.t+(1-(e-mnE)/rng)*ph;
+      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+  }
+
+  // Current dot
+  const lx=pad.l+((allE.length-1)/Math.max(allE.length-1,1))*pw;
+  const ly=pad.t+(1-(allE[allE.length-1]-mnE)/rng)*ph;
+  ctx.fillStyle='#e67e22'; ctx.beginPath(); ctx.arc(lx,ly,3.5,0,Math.PI*2); ctx.fill();
+
+  // Labels
+  ctx.fillStyle='#666'; ctx.font='9px monospace'; ctx.textAlign='end';
+  ctx.fillText(mxE.toFixed(0),pad.l-4,pad.t+4);
+  ctx.fillText(mnE.toFixed(0),pad.l-4,pad.t+ph+4);
+  ctx.textAlign='center';
+  ctx.fillText('step',pad.l+pw/2,ch-3);
+}
+
+function drawMiniGrids() {
+  const container=document.getElementById('mini-grids');
+  container.innerHTML='';
+  PKEYS.forEach(k=>{
+    const div=document.createElement('div');
+    div.className='mini-grid'+(selectedPattern===k?' selected':'');
+    div.onclick=()=>{initSim(k,corruptionPct);};
+    const cv=document.createElement('canvas');
+    cv.width=50; cv.height=50;
+    const sel=selectedPattern===k;
+    cv.style.border=sel?`2.5px solid ${PCOLORS[k]}`:'1.5px solid #ddd';
+    cv.style.borderRadius='4px';
+    const ctx=cv.getContext('2d');
+    const pat=PFNS[k](), cell=5;
+    ctx.fillStyle='#fafafa'; ctx.fillRect(0,0,50,50);
+    for(let i=0;i<N;i++){
+      const r=Math.floor(i/GRID),c=i%GRID;
+      ctx.fillStyle=pat[i]===1?'#1a3a5c':'#f0f0f0';
+      ctx.fillRect(c*cell,r*cell,cell,cell);
+    }
+    div.appendChild(cv);
+    const lbl=document.createElement('div');
+    lbl.className='mini-label';
+    lbl.style.fontWeight=sel?'700':'500';
+    lbl.style.color=sel?PCOLORS[k]:'#666';
+    lbl.textContent=k;
+    div.appendChild(lbl);
+    container.appendChild(div);
+  });
+}
+
+function drawOverlaps() {
+  const container=document.getElementById('overlap-bars');
+  container.innerHTML='';
+  PKEYS.forEach(k=>{
+    const v=overlaps[k]||0, av=Math.abs(v);
+    const row=document.createElement('div'); row.className='overlap-row';
+    row.innerHTML=`
+      <span class="overlap-label" style="color:${PCOLORS[k]}">m${k}</span>
+      <div class="overlap-bg"><div class="overlap-fill" style="width:${av*100}%;background:${PCOLORS[k]}"></div></div>
+      <span class="overlap-val" style="color:${av>0.9?PCOLORS[k]:'#666'}">${v.toFixed(2)}</span>
+    `;
+    container.appendChild(row);
+  });
+}
+
+function updateRunBtn() {
+  const btn=document.getElementById('btn-run');
+  btn.textContent=running?'⏸ Pause':'▶ Run';
+  btn.className='btn btn-run'+(running?' active':'');
+  btn.disabled=converged;
+  document.getElementById('btn-step').disabled=running||converged;
+}
+
+function updateUI() {
+  drawGrid(); drawChart(); drawOverlaps(); drawMiniGrids();
+  document.getElementById('step-count').textContent=stepCount;
+  document.getElementById('energy-val').textContent=eHist[eHist.length-1]?.toFixed(1);
+  const msg=document.getElementById('converged-msg');
+  if(converged&&convergedTo){
+    msg.style.display='block';
+    msg.style.color=PCOLORS[convergedTo]||'#2ecc71';
+    msg.textContent=`✓ Converged to pattern ${convergedTo}`;
+  } else { msg.style.display='none'; }
+  updateRunBtn();
+}
+
+// ── Event listeners ───────────────────────────────────────
+document.getElementById('corr-slider').addEventListener('input', function(){
+  corruptionPct=parseInt(this.value);
+  document.getElementById('corr-val').textContent=corruptionPct+'%';
+  initSim(selectedPattern,corruptionPct);
+});
+
+document.getElementById('speed-slider').addEventListener('input', function(){
+  if(running){
+    clearInterval(intervalId);
+    const sp=parseInt(this.value);
+    intervalId=setInterval(()=>{
+      if(!running||converged){clearInterval(intervalId);intervalId=null;updateRunBtn();return;}
+      doOneStep();
+    }, sp);
+  }
+});
+
+// ── Start ─────────────────────────────────────────────────
+initSim("A", 30);
+</script>
+</body>
+</html>

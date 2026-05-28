@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Modern Hopfield Network · Letters &amp; Digits Retrieval</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:'IBM Plex Mono','SF Mono','Fira Code','Consolas',monospace;
+    background:#fff;color:#1a1a1a;padding:16px 20px;max-width:1060px;margin:0 auto;
+  }
+  h2{font-size:17px;font-weight:700;letter-spacing:-0.02em;margin-bottom:2px}
+  .sub{font-size:11px;color:#666;margin-bottom:12px;line-height:1.5}
+  .sub b{color:#1a3a5c}
+
+  /* ── Pattern bar ── */
+  .pat-section{margin-bottom:8px}
+  .pat-header{font-size:10px;font-weight:600;color:#888;margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em}
+  .pat-row{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
+  .mini{text-align:center;cursor:pointer;user-select:none;transition:transform 0.1s,opacity 0.1s}
+  .mini canvas{display:block;border-radius:3px}
+  .mini .mlbl{font-size:10px;margin-top:1px;font-weight:600}
+  .mini.sel canvas{box-shadow:0 0 0 2.5px var(--pc)}
+  .mini.sel .mlbl{color:var(--pc)}
+  .mini:not(.sel) .mlbl{color:#aaa}
+
+  /* ── Main layout ── */
+  .main{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px}
+  .left{flex:0 0 auto}
+  .right{flex:1;min-width:290px}
+
+  /* ── Grid ── */
+  .grid-panel canvas{border:1px solid #ddd;border-radius:4px}
+  .grid-stats{display:flex;justify-content:space-between;margin-top:4px;font-size:11px}
+  .conv-msg{margin-top:4px;font-size:12px;font-weight:700;text-align:center}
+
+  /* ── Overlaps / attention ── */
+  .sec-label{font-size:10px;font-weight:600;color:#666;margin-bottom:4px;margin-top:8px}
+  .attn-row{display:flex;align-items:center;gap:4px;margin-bottom:2px;font-size:11px}
+  .attn-lbl{font-weight:600;width:22px;text-align:center}
+  .attn-bar{width:90px;height:10px;background:#eee;border-radius:2px;overflow:hidden}
+  .attn-fill{height:100%;border-radius:2px;transition:width 0.08s}
+  .attn-val{font-weight:600;width:48px;text-align:right;font-size:10px}
+  .attn-wrap{max-height:240px;overflow-y:auto;padding-right:4px}
+
+  /* ── Chart ── */
+  .chart canvas{border:1px solid #e0e0e0;border-radius:4px;margin-bottom:8px}
+
+  /* ── Controls ── */
+  .ctrl-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:6px}
+  .btn{padding:5px 14px;font-size:11px;font-weight:700;font-family:inherit;border-radius:5px;cursor:pointer;border:2px solid;transition:all 0.12s}
+  .btn-run{border-color:#1a3a5c;background:transparent;color:#1a3a5c}
+  .btn-run.on{background:#1a3a5c;color:#fff}
+  .btn-run:disabled{opacity:0.35;cursor:default}
+  .btn-step{border-color:#888;background:transparent;color:#444;font-weight:600}
+  .btn-step:disabled{opacity:0.35;cursor:default}
+  .btn-reset{border-color:#c0392b;background:transparent;color:#c0392b;font-weight:600}
+
+  .param-row{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+  .param-row span{font-size:10px;color:#666}
+  .param-row input[type=range]{width:80px;accent-color:#1a3a5c}
+  .param-val{font-size:11px;font-weight:600;min-width:36px}
+
+  .legend{margin-top:8px;padding:6px 8px;background:rgba(0,0,0,0.025);border-radius:4px;font-size:10px;color:#666;line-height:1.7}
+  .sw{display:inline-block;width:9px;height:9px;border-radius:2px;vertical-align:middle}
+
+  .status-bar{padding:5px 10px;border-radius:5px;font-size:11px;font-weight:600;margin-bottom:8px}
+  .status-bar.ok{background:#e8f5e9;color:#2e7d32}
+  .status-bar.info{background:#e3f2fd;color:#1565c0}
+
+  .tab-bar{display:flex;gap:2px;margin-bottom:8px}
+  .tab{padding:4px 12px;font-size:10px;font-weight:700;font-family:inherit;border:none;border-radius:4px 4px 0 0;cursor:pointer;transition:all 0.1s;background:#eee;color:#666}
+  .tab.active{background:#1a3a5c;color:#fff}
+</style>
+</head>
+<body>
+
+<h2>Modern Hopfield Network · Letters &amp; Digits</h2>
+<p class="sub">
+  Update rule: <b>ξ<sup>new</sup> = X · softmax(β X<sup>T</sup>ξ)</b> &nbsp;·&nbsp;
+  Energy: <b>E(ξ) = −lse(β X<sup>T</sup>ξ) + ½‖ξ‖²</b> &nbsp;·&nbsp;
+  Capacity: <b>M = O(e<sup>d/2</sup>)</b> — exponential in dimension · <b>36 patterns</b> (A–Z + 0–9)
+</p>
+
+<div class="status-bar info" id="status-bar"></div>
+
+<div class="pat-section">
+  <div class="pat-header">Letters</div>
+  <div class="pat-row" id="letter-row"></div>
+  <div class="pat-header">Digits</div>
+  <div class="pat-row" id="digit-row"></div>
+</div>
+
+<div class="main">
+  <div class="left">
+    <div class="tab-bar">
+      <button class="tab active" id="tab-query" onclick="setView('query')">Query → Result</button>
+      <button class="tab" id="tab-target" onclick="setView('target')">Target</button>
+    </div>
+    <div class="grid-panel">
+      <canvas id="grid-cv" width="322" height="322"></canvas>
+      <div class="grid-stats">
+        <span>Iteration: <strong id="step-ct">0</strong></span>
+        <span style="color:#666">E = <span id="e-val">—</span></span>
+      </div>
+      <div class="conv-msg" id="conv-msg" style="display:none"></div>
+    </div>
+  </div>
+
+  <div class="right">
+    <div class="sec-label">Softmax attention weights α<sub>μ</sub> = softmax(β X<sup>T</sup>ξ)</div>
+    <div class="attn-wrap" id="attn-bars"></div>
+
+    <div class="chart" style="margin-top:8px">
+      <div class="sec-label">Energy E(ξ)</div>
+      <canvas id="chart-cv" width="320" height="110"></canvas>
+    </div>
+
+    <div class="param-row">
+      <span>β (inverse temperature):</span>
+      <input type="range" id="beta-sl" min="0" max="1000" value="860">
+      <span class="param-val" id="beta-val">20</span>
+    </div>
+    <div class="param-row">
+      <span>Corruption:</span>
+      <input type="range" id="corr-sl" min="5" max="60" value="30">
+      <span class="param-val" id="corr-val">30%</span>
+    </div>
+    <div class="param-row">
+      <span>Random seed:</span>
+      <input type="number" id="seed-input" value="42" min="0" max="9999" style="width:56px;font-family:inherit;font-size:11px;font-weight:600;border:1.5px solid #ccc;border-radius:4px;padding:2px 5px;text-align:center">
+      <button id="seed-dice" onclick="randomizeSeed()" style="border:1.5px solid #888;background:transparent;border-radius:4px;cursor:pointer;font-size:14px;padding:1px 6px;line-height:1" title="Random seed">🎲</button>
+      <span style="font-size:9px;color:#aaa;margin-left:2px">different corruption pattern</span>
+    </div>
+
+    <div class="ctrl-row">
+      <button class="btn btn-run" id="btn-run" onclick="toggleRun()">▶ Run</button>
+      <button class="btn btn-step" id="btn-step" onclick="doStep()">Iterate</button>
+      <button class="btn btn-reset" onclick="resetSim()">Reset</button>
+      <div class="param-row" style="margin:0;margin-left:4px">
+        <span>Fast</span>
+        <input type="range" id="sp-sl" min="50" max="800" value="200" style="width:60px">
+        <span>Slow</span>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div><span class="sw" style="background:#1a3a5c"></span> ξ<sub>i</sub> &gt; 0.3 &nbsp;
+           <span class="sw" style="background:#f0f0f0;border:1px solid #ccc"></span> ξ<sub>i</sub> &lt; −0.3 &nbsp;
+           <span class="sw" style="background:#b0bec5"></span> |ξ<sub>i</sub>| &lt; 0.3 (uncertain)
+      </div>
+      <div style="margin-top:3px"><b>Modern Hopfield</b> (Ramsauer et al. 2020): continuous states, softmax retrieval</div>
+      <div>ξ<sup>new</sup> = X · softmax(β X<sup>T</sup> ξ) — converges in ~1 iteration for high β</div>
+      <div>Capacity: M = O(e<sup>d/2</sup>), vs classical M ≈ 0.138 N</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  PATTERN DEFINITIONS  (10×10 grid, N=100)
+// ═══════════════════════════════════════════════════════════════
+const N=100, G=10, CELL=32;
+
+function mp(cs){
+  const p=new Float64Array(N).fill(-1);
+  for(const[r,c]of cs) if(r>=0&&r<10&&c>=0&&c<10) p[r*10+c]=1;
+  return p;
+}
+
+// ── Letters (full A–Z) ──
+const LETTERS={
+  A:()=>{let c=[];for(let r=1;r<=8;r++){c.push([r,2]);c.push([r,7])}for(let k=3;k<=6;k++){c.push([1,k]);c.push([5,k])}return mp(c)},
+  B:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=6;k++){c.push([1,k]);c.push([5,k]);c.push([8,k])}for(let r=2;r<=4;r++)c.push([r,7]);for(let r=6;r<=7;r++)c.push([r,7]);return mp(c)},
+  C:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=7;k++){c.push([1,k]);c.push([8,k])}return mp(c)},
+  D:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=5;k++){c.push([1,k]);c.push([8,k])}c.push([2,6],[3,7],[4,7],[5,7],[6,7],[7,6]);return mp(c)},
+  E:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=7;k++){c.push([1,k]);c.push([8,k])}for(let k=3;k<=5;k++)c.push([5,k]);return mp(c)},
+  F:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=7;k++)c.push([1,k]);for(let k=3;k<=5;k++)c.push([5,k]);return mp(c)},
+  G:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=7;k++){c.push([1,k]);c.push([8,k])}for(let r=5;r<=7;r++)c.push([r,7]);c.push([5,5],[5,6]);return mp(c)},
+  H:()=>{let c=[];for(let r=1;r<=8;r++){c.push([r,2]);c.push([r,7])}for(let k=3;k<=6;k++)c.push([5,k]);return mp(c)},
+  I:()=>{let c=[];for(let k=2;k<=7;k++){c.push([1,k]);c.push([8,k])}for(let r=2;r<=7;r++)c.push([r,5]);return mp(c)},
+  J:()=>{let c=[];for(let k=3;k<=7;k++)c.push([1,k]);for(let r=1;r<=7;r++)c.push([r,7]);c.push([8,4],[8,5],[8,6],[7,3]);return mp(c)},
+  K:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);c.push([5,3],[4,4],[3,5],[2,6],[1,7],[6,4],[7,5],[8,6]);return mp(c)},
+  L:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=7;k++)c.push([8,k]);return mp(c)},
+  M:()=>{let c=[];for(let r=1;r<=8;r++){c.push([r,1]);c.push([r,8])}c.push([2,2],[3,3],[2,7],[3,6]);for(let r=4;r<=5;r++){c.push([r,4]);c.push([r,5])}return mp(c)},
+  N:()=>{let c=[];for(let r=1;r<=8;r++){c.push([r,2]);c.push([r,7])}c.push([2,3],[3,4],[4,4],[5,5],[6,5],[7,6]);return mp(c)},
+  O:()=>{let c=[];for(let r=2;r<=7;r++){c.push([r,2]);c.push([r,7])}for(let k=3;k<=6;k++){c.push([1,k]);c.push([8,k])}return mp(c)},
+  P:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=6;k++){c.push([1,k]);c.push([5,k])}for(let r=2;r<=4;r++)c.push([r,7]);return mp(c)},
+  Q:()=>{let c=[];for(let r=2;r<=7;r++){c.push([r,2]);c.push([r,7])}for(let k=3;k<=6;k++){c.push([1,k]);c.push([8,k])}c.push([7,6],[8,7]);return mp(c)},
+  R:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=6;k++){c.push([1,k]);c.push([5,k])}for(let r=2;r<=4;r++)c.push([r,7]);c.push([6,4],[7,5],[8,6]);return mp(c)},
+  S:()=>{let c=[];for(let k=3;k<=7;k++)c.push([1,k]);for(let k=2;k<=6;k++)c.push([8,k]);c.push([2,2],[3,2],[4,3],[4,4],[4,5],[5,5],[5,6],[5,7],[6,7],[7,7]);return mp(c)},
+  T:()=>{let c=[];for(let k=1;k<=8;k++)c.push([1,k]);for(let r=2;r<=8;r++)c.push([r,5]);return mp(c)},
+  U:()=>{let c=[];for(let r=1;r<=7;r++){c.push([r,2]);c.push([r,7])}for(let k=3;k<=6;k++)c.push([8,k]);return mp(c)},
+  V:()=>{let c=[];for(let r=1;r<=4;r++){c.push([r,1]);c.push([r,8])}c.push([5,2],[5,7],[6,3],[6,6],[7,4],[7,5],[8,4],[8,5]);return mp(c)},
+  W:()=>{let c=[];for(let r=1;r<=7;r++){c.push([r,1]);c.push([r,8])}c.push([8,2],[8,7]);for(let r=5;r<=8;r++){c.push([r,4]);c.push([r,5])}return mp(c)},
+  X:()=>{let c=[];for(let i=0;i<8;i++){c.push([i+1,i+1]);c.push([i+1,8-i])}return mp(c)},
+  Y:()=>{let c=[];c.push([1,1],[2,2],[3,3],[1,8],[2,7],[3,6],[4,4],[4,5]);for(let r=5;r<=8;r++)c.push([r,4],[r,5]);return mp(c)},
+  Z:()=>{let c=[];for(let k=1;k<=8;k++){c.push([1,k]);c.push([8,k])}c.push([2,7],[3,6],[4,5],[5,4],[6,3],[7,2]);return mp(c)},
+};
+
+// ── Digits ──
+const DIGITS={
+  0:()=>{let c=[];for(let r=2;r<=7;r++){c.push([r,2]);c.push([r,7])}for(let k=3;k<=6;k++){c.push([1,k]);c.push([8,k])}return mp(c)},
+  1:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,5]);c.push([2,4],[1,4]);for(let k=3;k<=7;k++)c.push([8,k]);return mp(c)},
+  2:()=>{let c=[];for(let k=2;k<=7;k++){c.push([1,k]);c.push([8,k])}c.push([2,7],[3,7],[4,6],[4,5],[5,4],[5,3],[6,2],[7,2]);c.push([5,5]);return mp(c)},
+  3:()=>{let c=[];for(let k=2;k<=6;k++){c.push([1,k]);c.push([5,k]);c.push([8,k])}for(let r=2;r<=4;r++)c.push([r,7]);for(let r=6;r<=7;r++)c.push([r,7]);return mp(c)},
+  4:()=>{let c=[];for(let r=1;r<=5;r++)c.push([r,2]);for(let k=3;k<=7;k++)c.push([5,k]);for(let r=1;r<=8;r++)c.push([r,6]);return mp(c)},
+  5:()=>{let c=[];for(let k=2;k<=7;k++){c.push([1,k]);c.push([5,k]);c.push([8,k])}for(let r=2;r<=4;r++)c.push([r,2]);for(let r=6;r<=7;r++)c.push([r,7]);return mp(c)},
+  6:()=>{let c=[];for(let r=1;r<=8;r++)c.push([r,2]);for(let k=3;k<=6;k++){c.push([1,k]);c.push([5,k]);c.push([8,k])}for(let r=6;r<=7;r++)c.push([r,7]);return mp(c)},
+  7:()=>{let c=[];for(let k=2;k<=7;k++)c.push([1,k]);for(let r=2;r<=8;r++)c.push([r,7]);return mp(c)},
+  8:()=>{let c=[];for(let r=2;r<=4;r++){c.push([r,2]);c.push([r,7])}for(let r=6;r<=7;r++){c.push([r,2]);c.push([r,7])}for(let k=3;k<=6;k++){c.push([1,k]);c.push([5,k]);c.push([8,k])}return mp(c)},
+  9:()=>{let c=[];for(let r=2;r<=4;r++)c.push([r,2]);for(let r=1;r<=8;r++)c.push([r,7]);for(let k=3;k<=6;k++){c.push([1,k]);c.push([5,k]);c.push([8,k])}return mp(c)},
+};
+
+const LETTER_KEYS=Object.keys(LETTERS);
+const DIGIT_KEYS=Object.keys(DIGITS);
+const ALL_KEYS=[...LETTER_KEYS,...DIGIT_KEYS];
+
+function getPatternFn(k){return LETTERS[k]||DIGITS[k]}
+
+// Colors
+// Colors – spread hues across 36 patterns
+const PCOL={};
+ALL_KEYS.forEach((k,i)=>{
+  const h=(i*360/ALL_KEYS.length)%360;
+  PCOL[k]=`hsl(${Math.round(h)},58%,44%)`;
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  MODERN HOPFIELD NETWORK CORE
+// ═══════════════════════════════════════════════════════════════
+
+// Normalize a pattern to unit norm
+function normalize(p){
+  const n=Math.sqrt(p.reduce((s,v)=>s+v*v,0));
+  if(n<1e-12)return new Float64Array(N);
+  return p.map(v=>v/n);
+}
+
+// Build memory matrix X (d×M), columns are normalized stored patterns
+function buildX(keys){
+  const M=keys.length;
+  const X=[];// X[i][mu] = i-th component of mu-th pattern
+  for(let i=0;i<N;i++){
+    X[i]=new Float64Array(M);
+    for(let mu=0;mu<M;mu++){
+      X[i][mu]=keys[mu].__pat[i];
+    }
+  }
+  return X;
+}
+
+// softmax with numerical stability
+function softmax(z,beta){
+  const bz=z.map(v=>v*beta);
+  const mx=Math.max(...bz);
+  const ex=bz.map(v=>Math.exp(v-mx));
+  const sm=ex.reduce((s,v)=>s+v,0);
+  return ex.map(v=>v/sm);
+}
+
+// log-sum-exp
+function lse(z,beta){
+  const bz=z.map(v=>v*beta);
+  const mx=Math.max(...bz);
+  const s=bz.reduce((acc,v)=>acc+Math.exp(v-mx),0);
+  return (mx+Math.log(s))/beta;
+}
+
+// Modern Hopfield energy: E(xi) = -lse(beta * X^T xi) + 0.5 * ||xi||^2
+function modernEnergy(xi,X,M,beta){
+  // Compute z = X^T xi
+  const z=new Float64Array(M);
+  for(let mu=0;mu<M;mu++){
+    let s=0;for(let i=0;i<N;i++) s+=X[i][mu]*xi[i];
+    z[mu]=s;
+  }
+  const lseVal=lse(z,beta);
+  let norm2=0;for(let i=0;i<N;i++) norm2+=xi[i]*xi[i];
+  return -lseVal + 0.5*norm2;
+}
+
+// One modern Hopfield update: xi_new = X * softmax(beta * X^T * xi)
+function modernUpdate(xi,X,M,beta){
+  // z = X^T xi (M-vector of similarities)
+  const z=new Float64Array(M);
+  for(let mu=0;mu<M;mu++){
+    let s=0;for(let i=0;i<N;i++) s+=X[i][mu]*xi[i];
+    z[mu]=s;
+  }
+  // alpha = softmax(beta * z)
+  const alpha=softmax(z,beta);
+  // xi_new = X * alpha
+  const xiNew=new Float64Array(N);
+  for(let i=0;i<N;i++){
+    let s=0;for(let mu=0;mu<M;mu++) s+=X[i][mu]*alpha[mu];
+    xiNew[i]=s;
+  }
+  return {xi:xiNew, attn:alpha, sims:z};
+}
+
+// Overlap with a binary pattern (cosine similarity)
+function overlap(xi,pat){
+  let dot=0,n1=0,n2=0;
+  for(let i=0;i<N;i++){dot+=xi[i]*pat[i];n1+=xi[i]*xi[i];n2+=pat[i]*pat[i];}
+  return dot/(Math.sqrt(n1)*Math.sqrt(n2)+1e-12);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════
+let storedKeys=ALL_KEYS.slice(); // all patterns stored
+let storedPats=[]; // {key, pat} objects
+let X=[]; // memory matrix
+let targetKey="A";
+let beta=20;
+let corrPct=30;
+let xi=null; // current continuous state
+let eHist=[];
+let attnWeights=[];
+let sims=[];
+let iterCount=0;
+let running=false, converged=false, convergedTo=null;
+let intId=null;
+let viewMode='query'; // 'query' or 'target'
+let seed=42;
+
+function mb32(a){return function(){a|=0;a=(a+0x6d2b79f5)|0;let t=Math.imul(a^(a>>>15),1|a);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296}}
+let rng=mb32(42);
+
+function corruptContinuous(pat,pct,rng){
+  const s=new Float64Array(N);
+  for(let i=0;i<N;i++) s[i]=pat[i];
+  const nFlip=Math.round(pct/100*N);
+  const idx=Array.from({length:N},(_,i)=>i);
+  for(let i=idx.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[idx[i],idx[j]]=[idx[j],idx[i]]}
+  for(let k=0;k<nFlip;k++) s[idx[k]]*=-1;
+  // Add small continuous noise to make it truly continuous
+  for(let i=0;i<N;i++) s[i]+=(rng()-0.5)*0.3;
+  return s;
+}
+
+function rebuildMemory(){
+  storedPats=storedKeys.map(k=>({key:k, pat:getPatternFn(k)()}));
+  // Build X matrix
+  const M=storedPats.length;
+  X=[];
+  for(let i=0;i<N;i++){
+    X[i]=new Float64Array(M);
+    for(let mu=0;mu<M;mu++) X[i][mu]=storedPats[mu].pat[i];
+  }
+}
+
+function initSim(){
+  if(intId){clearInterval(intId);intId=null}
+  running=false;converged=false;convergedTo=null;iterCount=0;
+  if(!storedKeys.includes(targetKey)) targetKey=storedKeys[0]||"A";
+  rebuildMemory();
+  rng=mb32(seed*97+(targetKey.charCodeAt?targetKey.charCodeAt(0):48+parseInt(targetKey)));
+  const pat=getPatternFn(targetKey)();
+  xi=corruptContinuous(pat,corrPct,rng);
+  const M=storedPats.length;
+  eHist=[modernEnergy(xi,X,M,beta)];
+  // Compute initial attention
+  const res=modernUpdate(xi,X,M,beta);
+  attnWeights=res.attn;
+  sims=res.sims;
+  updateAll();
+}
+
+function doOneIteration(){
+  if(converged||storedPats.length<2)return;
+  const M=storedPats.length;
+  const res=modernUpdate(xi,X,M,beta);
+  xi=res.xi;
+  attnWeights=res.attn;
+  sims=res.sims;
+  iterCount++;
+  eHist.push(modernEnergy(xi,X,M,beta));
+
+  // Check convergence: find best overlap
+  let bestOvlp=-Infinity, bestKey=null;
+  for(let mu=0;mu<M;mu++){
+    const ov=overlap(xi,storedPats[mu].pat);
+    if(ov>bestOvlp){bestOvlp=ov;bestKey=storedPats[mu].key;}
+  }
+  if(bestOvlp>0.95){
+    converged=true;running=false;convergedTo=bestKey;
+    if(intId){clearInterval(intId);intId=null}
+  }
+  updateAll();
+}
+
+function doStep(){if(!running&&!converged)doOneIteration()}
+
+function toggleRun(){
+  if(converged||storedPats.length<2)return;
+  running=!running;
+  if(running){
+    const sp=+document.getElementById('sp-sl').value;
+    intId=setInterval(()=>{
+      if(!running||converged){clearInterval(intId);intId=null;updateCtrls();return}
+      doOneIteration();
+    },sp);
+  }else{if(intId){clearInterval(intId);intId=null}}
+  updateCtrls();
+}
+
+function resetSim(){initSim()}
+
+function setView(mode){
+  viewMode=mode;
+  document.getElementById('tab-query').className='tab'+(mode==='query'?' active':'');
+  document.getElementById('tab-target').className='tab'+(mode==='target'?' active':'');
+  drawGrid();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DRAWING
+// ═══════════════════════════════════════════════════════════════
+
+function drawGrid(){
+  const cv=document.getElementById('grid-cv'),ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.fillStyle='#fafafa';ctx.fillRect(0,0,cv.width,cv.height);
+
+  let vals;
+  if(viewMode==='target'){
+    vals=getPatternFn(targetKey)();
+  }else{
+    vals=xi;
+  }
+  if(!vals)return;
+
+  for(let idx=0;idx<N;idx++){
+    const r=Math.floor(idx/G),c=idx%G;
+    const x=c*CELL+1,y=r*CELL+1;
+    let v=vals[idx];
+
+    if(viewMode==='target'){
+      // Binary display
+      ctx.fillStyle=v>0?'#1a3a5c':'#f0f0f0';
+    }else{
+      // Continuous: map value to color
+      // Clamp to [-1.5, 1.5] for display
+      const vc=Math.max(-1.5,Math.min(1.5,v));
+      if(vc>0.3){
+        // Positive: dark blue, intensity scales with value
+        const t=Math.min(1,(vc-0.3)/1.2);
+        const r0=26,g0=58,b0=92;  // #1a3a5c
+        const r1=230,g1=235,b1=240;
+        const ri=Math.round(r1+(r0-r1)*t);
+        const gi=Math.round(g1+(g0-g1)*t);
+        const bi=Math.round(b1+(b0-b1)*t);
+        ctx.fillStyle=`rgb(${ri},${gi},${bi})`;
+      }else if(vc<-0.3){
+        // Negative: light (off), very negative = pure white
+        const t=Math.min(1,(-vc-0.3)/1.2);
+        const gray=Math.round(240-t*10);
+        ctx.fillStyle=`rgb(${gray},${gray},${gray})`;
+      }else{
+        // Uncertain zone: gray
+        ctx.fillStyle='#b0bec5';
+      }
+    }
+
+    ctx.beginPath();ctx.roundRect(x,y,CELL,CELL,2);ctx.fill();
+    ctx.strokeStyle='#ccc';ctx.lineWidth=0.5;ctx.stroke();
+  }
+}
+
+function drawMiniRow(keys,containerId){
+  const container=document.getElementById(containerId);
+  container.innerHTML='';
+  keys.forEach(k=>{
+    const d=document.createElement('div');
+    d.className='mini'+(k===targetKey?' sel':'');
+    d.style.setProperty('--pc',PCOL[k]);
+    d.onclick=()=>{targetKey=k;initSim()};
+    const cv=document.createElement('canvas');cv.width=36;cv.height=36;
+    cv.style.border=k===targetKey?`2px solid ${PCOL[k]}`:'1.5px solid #ddd';
+    cv.style.borderRadius='3px';
+    const ctx=cv.getContext('2d');
+    const pat=getPatternFn(k)();
+    const cl=3.6;
+    ctx.fillStyle='#fafafa';ctx.fillRect(0,0,36,36);
+    for(let i=0;i<N;i++){
+      const r=Math.floor(i/G),c=i%G;
+      ctx.fillStyle=pat[i]>0?'#1a3a5c':'#f0f0f0';
+      ctx.fillRect(c*cl,r*cl,cl,cl);
+    }
+    d.appendChild(cv);
+    const lb=document.createElement('div');lb.className='mlbl';
+    lb.style.color=k===targetKey?PCOL[k]:'#aaa';
+    lb.textContent=k;
+    d.appendChild(lb);
+    container.appendChild(d);
+  });
+}
+
+function drawAttn(){
+  const c=document.getElementById('attn-bars');c.innerHTML='';
+  if(!attnWeights||storedPats.length===0)return;
+
+  // Sort by attention weight descending for readability
+  const indexed=storedPats.map((p,mu)=>({key:p.key,attn:attnWeights[mu],sim:sims[mu]}));
+  indexed.sort((a,b)=>b.attn-a.attn);
+
+  // Show top patterns + any with attn > 0.001
+  const shown=indexed.filter((x,i)=>i<8||x.attn>0.001);
+
+  shown.forEach(item=>{
+    const v=item.attn;
+    const d=document.createElement('div');d.className='attn-row';
+    const isTarget=item.key===targetKey;
+    const barColor=PCOL[item.key];
+    d.innerHTML=`
+      <span class="attn-lbl" style="color:${barColor};${isTarget?'text-decoration:underline':''}">
+        ${item.key}
+      </span>
+      <div class="attn-bar"><div class="attn-fill" style="width:${Math.min(v*100,100)}%;background:${barColor};opacity:${0.4+v*0.6}"></div></div>
+      <span class="attn-val" style="color:${v>0.5?barColor:'#999'}">${(v*100).toFixed(1)}%</span>
+    `;
+    c.appendChild(d);
+  });
+  if(indexed.length>shown.length){
+    const more=document.createElement('div');
+    more.style.cssText='font-size:10px;color:#aaa;margin-top:2px';
+    more.textContent=`+ ${indexed.length-shown.length} more (all < 0.1%)`;
+    c.appendChild(more);
+  }
+}
+
+function drawChart(){
+  const cv=document.getElementById('chart-cv'),ctx=cv.getContext('2d');
+  const cw=cv.width,ch=cv.height;
+  const pad={t:14,r:10,b:22,l:50},pw=cw-pad.l-pad.r,ph=ch-pad.t-pad.b;
+  ctx.clearRect(0,0,cw,ch);ctx.fillStyle='#fafafa';ctx.fillRect(0,0,cw,ch);
+
+  const allE=eHist.length?eHist:[0];
+  const mn=Math.min(...allE)-2,mx=Math.max(...allE)+2,rn=mx-mn||1;
+
+  // Axes
+  ctx.strokeStyle='#999';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(pad.l,pad.t);ctx.lineTo(pad.l,pad.t+ph);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(pad.l,pad.t+ph);ctx.lineTo(pad.l+pw,pad.t+ph);ctx.stroke();
+
+  // Energy line
+  if(allE.length>1){
+    ctx.strokeStyle='#1a3a5c';ctx.lineWidth=1.8;
+    ctx.beginPath();
+    allE.forEach((e,i)=>{
+      const x=pad.l+(i/Math.max(allE.length-1,1))*pw;
+      const y=pad.t+(1-(e-mn)/rn)*ph;
+      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+  }
+
+  // Current dot
+  const lx=pad.l+((allE.length-1)/Math.max(allE.length-1,1))*pw;
+  const ly=pad.t+(1-(allE[allE.length-1]-mn)/rn)*ph;
+  ctx.fillStyle='#e67e22';ctx.beginPath();ctx.arc(lx,ly,3.5,0,Math.PI*2);ctx.fill();
+
+  // Labels
+  ctx.fillStyle='#666';ctx.font='8px monospace';ctx.textAlign='end';
+  ctx.fillText(mx.toFixed(1),pad.l-3,pad.t+6);
+  ctx.fillText(mn.toFixed(1),pad.l-3,pad.t+ph+4);
+  ctx.textAlign='center';
+  ctx.fillText('iteration',pad.l+pw/2,ch-3);
+}
+
+function drawStatus(){
+  const M=storedPats.length;
+  const el=document.getElementById('status-bar');
+  const classicalCap=Math.floor(0.138*N);
+  el.className='status-bar info';
+  el.innerHTML=`M = ${M} patterns stored · Classical limit: ≈ ${classicalCap} · Modern capacity: O(e<sup>${N}/2</sup>) ≈ 10<sup>${Math.floor(N/(2*Math.log(10)))}</sup> — <b>no capacity problem</b>`;
+}
+
+function updateCtrls(){
+  const br=document.getElementById('btn-run');
+  br.textContent=running?'⏸ Pause':'▶ Run';
+  br.className='btn btn-run'+(running?' on':'');
+  br.disabled=converged||storedPats.length<2;
+  document.getElementById('btn-step').disabled=running||converged||storedPats.length<2;
+}
+
+function updateAll(){
+  drawMiniRow(LETTER_KEYS,'letter-row');
+  drawMiniRow(DIGIT_KEYS,'digit-row');
+  drawGrid();drawAttn();drawChart();drawStatus();
+  document.getElementById('step-ct').textContent=iterCount;
+  document.getElementById('e-val').textContent=eHist.length?eHist[eHist.length-1].toFixed(2):'—';
+  const cm=document.getElementById('conv-msg');
+  if(converged&&convergedTo!=null){
+    cm.style.display='block';
+    cm.style.color=PCOL[convergedTo]||'#2ecc71';
+    const isCorrect=convergedTo===targetKey;
+    cm.textContent=`✓ Converged to "${convergedTo}" in ${iterCount} iteration${iterCount!==1?'s':''}${isCorrect?'':' (WRONG)'}`;
+  }else{cm.style.display='none'}
+  updateCtrls();
+}
+
+// ── Event listeners ──
+// Map slider 0–1000 to β 0.001–100 logarithmically
+function sliderToBeta(v){return Math.pow(10,-3+5*v/1000)}
+function betaToSlider(b){return Math.round(1000*(Math.log10(b)+3)/5)}
+function fmtBeta(b){return b>=1?b.toFixed(1):b>=0.01?b.toFixed(3):b.toExponential(1)}
+
+document.getElementById('beta-sl').addEventListener('input',function(){
+  beta=sliderToBeta(+this.value);
+  document.getElementById('beta-val').textContent=fmtBeta(beta);
+  initSim();
+});
+document.getElementById('corr-sl').addEventListener('input',function(){
+  corrPct=+this.value;
+  document.getElementById('corr-val').textContent=corrPct+'%';
+  initSim();
+});
+document.getElementById('sp-sl').addEventListener('input',function(){
+  if(running){
+    clearInterval(intId);
+    intId=setInterval(()=>{
+      if(!running||converged){clearInterval(intId);intId=null;updateCtrls();return}
+      doOneIteration();
+    },+this.value);
+  }
+});
+
+document.getElementById('seed-input').addEventListener('change',function(){
+  seed=Math.max(0,Math.min(9999,+this.value||0));
+  this.value=seed;
+  initSim();
+});
+function randomizeSeed(){
+  seed=Math.floor(Math.random()*10000);
+  document.getElementById('seed-input').value=seed;
+  initSim();
+}
+
+// ── Start ──
+initSim();
+</script>
+</body>
+</html>
